@@ -2,7 +2,8 @@
 set(SERVER_SOURCE dncs.c
         message.h)
 set(CLIENT_SOURCE dncc.c
-        message.h)
+        message.h
+        message.c)
 
 # Create executable for the server
 add_executable(dncs ${SERVER_SOURCE})

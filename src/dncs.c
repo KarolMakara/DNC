@@ -6,6 +6,9 @@
 #include <sys/stat.h>
 #include <openssl/evp.h>
 #include <openssl/sha.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <signal.h>
 
 #include "message.h"
 
@@ -13,7 +16,27 @@
 #define PORT 8080
 #define MAX_BUFFER_SIZE 32768
 #define SERVER_DIRECTORY "/tmp/compilation_server"
+#define MAX_CLIENTS 1
 
+#include <time.h>
+
+#include <sys/time.h>
+void print_timestamp() {
+    struct timeval tv;
+    struct tm* timeinfo;
+    char buffer[64];
+
+    // Get the current time including milliseconds
+    gettimeofday(&tv, NULL);
+
+    // Convert the time to local time format
+    timeinfo = localtime(&tv.tv_sec);
+
+    // Format the time into a human-readable string including milliseconds
+    strftime(buffer, sizeof(buffer), "%M:%S", timeinfo);
+    printf("Current timestamp: %s.%05ld\n", buffer, tv.tv_usec);
+}
+int client_count = 0;
 
 char* createHashDirPath(const char *file_hash) {
     if (file_hash == NULL) {
@@ -195,9 +218,7 @@ char* extractDirectoryFromPath(const char *path) {
 
 
 // Function to receive file data from the client and save it
-char* receiveFile(int client_socket) {
-    MessageHeader header;
-    ssize_t valread;
+char* receiveFile(int client_socket, size_t data_length) {
     size_t buffer_size = MAX_BUFFER_SIZE;
     char *buffer = (char *)malloc(buffer_size);
     if (buffer == NULL) {
@@ -205,92 +226,80 @@ char* receiveFile(int client_socket) {
         return NULL;
     }
 
-    // Receive message header
-    valread = read(client_socket, &header, sizeof(header));
-    if (valread <= 0) {
-        perror("Error reading message header");
-        free(buffer);
+
+    char *file_data = (char *)malloc(data_length + 1);
+    if (file_data == NULL) {
+        perror("Error allocating memory for file data");
+        free(buffer); // Free buffer before returning
         return NULL;
     }
 
-    if (header.type == MSG_TYPE_FILE_DATA) {
-        size_t data_length = header.length;
-
-        // Receive file data
-        char *file_data = (char *)malloc(data_length + 1);
-        if (file_data == NULL) {
-            perror("Error allocating memory for file data");
-            free(buffer);
+    size_t total_received = 0;
+    while (total_received < data_length) {
+        size_t bytes_read = read(client_socket, buffer, buffer_size);
+        if (bytes_read <= 0) {
+            perror("Error reading file data");
+            free(file_data); // Free file_data before returning
+            free(buffer); // Free buffer before returning
             return NULL;
         }
 
-        size_t total_received = 0;
-        while (total_received < data_length) {
-            size_t bytes_read = read(client_socket, buffer, buffer_size);
-            if (bytes_read <= 0) {
-                perror("Error reading file data");
-                free(file_data);
-                free(buffer);
+        size_t remaining_bytes = data_length - total_received;
+        size_t bytes_to_copy = bytes_read < remaining_bytes ? bytes_read : remaining_bytes;
+        memcpy(file_data + total_received, buffer, bytes_to_copy);
+        total_received += bytes_to_copy;
+
+        // Extend the buffer size if necessary
+        if (bytes_read == buffer_size) {
+            buffer_size *= 2;
+            char *new_buffer = (char *)realloc(buffer, buffer_size);
+            if (new_buffer == NULL) {
+                perror("Error reallocating memory for buffer");
+                free(file_data); // Free file_data before returning
+                free(buffer); // Free buffer before returning
                 return NULL;
             }
-
-            size_t remaining_bytes = data_length - total_received;
-            size_t bytes_to_copy = bytes_read < remaining_bytes ? bytes_read : remaining_bytes;
-            memcpy(file_data + total_received, buffer, bytes_to_copy);
-            total_received += bytes_to_copy;
-
-            // Extend the buffer size if necessary
-            if (bytes_read == buffer_size) {
-                buffer_size *= 2;
-                char *new_buffer = (char *)realloc(buffer, buffer_size);
-                if (new_buffer == NULL) {
-                    perror("Error reallocating memory for buffer");
-                    free(file_data);
-                    free(buffer);
-                    return NULL;
-                }
-                buffer = new_buffer;
-            }
+            buffer = new_buffer;
         }
-        file_data[data_length] = '\0';
+    }
+    file_data[data_length] = '\0';
 
-        char file_hash[65]; // SHA-256 hash is 64 characters + null terminator
-        sha256(file_data, file_hash);
+    char file_hash[65]; // SHA-256 hash is 64 characters + null terminator
+    sha256(file_data, file_hash);
 
-        createDirectory(SERVER_DIRECTORY);
+    createDirectory(SERVER_DIRECTORY);
 
-        // Dynamically allocate memory for file path
-        char *file_path = (char *)malloc(strlen(SERVER_DIRECTORY) + strlen(file_hash) + 4 + 1); // +4 for ".c" and +1 for null terminator
-        if (file_path == NULL) {
-            perror("Error allocating memory for file path");
-            free(file_data);
-            return NULL;
-        }
-        snprintf(file_path, strlen(SERVER_DIRECTORY) + strlen(file_hash) + 4 + 1, "%s/%s.c", SERVER_DIRECTORY, file_hash);
-
-        FILE *file = fopen(file_path, "w");
-        if (file == NULL) {
-            perror("Error opening file for writing");
-            free(file_data);
-            free(file_path);
-            return NULL;
-        }
-        fputs(file_data, file);
-        fclose(file);
-
-        // Free allocated memory
-        free(file_data);
-
-        free(buffer);
-        return file_path;
-    } else {
-        perror("Unexpected message type");
+    char *file_path = (char *)malloc(strlen(SERVER_DIRECTORY) + strlen(file_hash) + 4 + 1); // +4 for ".c" and +1 for null terminator
+    if (file_path == NULL) {
+        perror("Error allocating memory for file path");
+        free(file_data); // Free file_data before returning
+        free(buffer); // Free buffer before returning
         return NULL;
     }
+    snprintf(file_path, strlen(SERVER_DIRECTORY) + strlen(file_hash) + 4 + 1, "%s/%s.c", SERVER_DIRECTORY, file_hash);
+
+    FILE *file = fopen(file_path, "w");
+    if (file == NULL) {
+        perror("Error opening file for writing");
+        free(file_data); // Free file_data before returning
+        free(file_path); // Free file_path before returning
+        free(buffer); // Free buffer before returning
+        return NULL;
+    }
+    fputs(file_data, file);
+    fclose(file);
+
+    // Free allocated memory
+    free(file_data);
+    free(buffer); // Free buffer here, as it's no longer needed
+    return file_path;
 }
+
 void sendACK(int client_socket) {
     MessageHeader header = { MSG_TYPE_ACK, 0 };
     ssize_t bytes_sent = send(client_socket, &header, sizeof(MessageHeader), 0);
+
+    printf("SEDNACKheader.type: %hhu\n header.length: %u\n", header.type, header.length);
     if (bytes_sent == -1) {
         perror("Send ACK failed");
         exit(EXIT_FAILURE);
@@ -298,10 +307,41 @@ void sendACK(int client_socket) {
 }
 
 void handleClient(int client_socket) {
-    // Receive file from client
-    char* file_path = receiveFile(client_socket);
+
+    char* file_path = NULL;
+
+    MessageHeader header;
+    memset(&header, 0, sizeof(MessageHeader));
+
+
+
+
+    printf("1111header.type: %hhu\n header.length: %u\n", header.type, header.length);
+    ssize_t valread = read(client_socket, &header, sizeof(MessageHeader));
+    printf("22222header.type: %hhu\n header.length: %u\n", header.type, header.length);
+    if (valread <= 0) {
+        perror("Error reading message header");
+        return;
+    }
+
+
+    if (header.type == MSG_TYPE_FILE_DATA) {
+        file_path = receiveFile(client_socket, header.length);
+    } else {
+        perror("Unexpected message type1");
+        printf("header.type: %hhu\n header.length: %u\n", header.type, header.length);
+        return;
+    }
+
+
+
+
+
+
+    printf("file_path: %s", file_path);
+
     if (file_path == NULL) {
-        close(client_socket);
+        close(client_socket);printf("DEBUG1\n");
         free(file_path);
         return;
     } else {
@@ -310,15 +350,15 @@ void handleClient(int client_socket) {
 
     sendACK(client_socket);
 
-    MessageHeader header;
+    memset(&header, 0, sizeof(MessageHeader));
     char buffer[MAX_BUFFER_SIZE];
     size_t bytes_received = 0;
 
-    while (bytes_received < sizeof(header)) {
-        ssize_t valread = read(client_socket, ((char *)&header) + bytes_received, sizeof(header) - bytes_received);
+    while (bytes_received < sizeof(MessageHeader)) {
+        ssize_t valread = read(client_socket, ((char *)&header) + bytes_received, sizeof(MessageHeader) - bytes_received);
         if (valread <= 0) {
             perror("Error reading message header");
-            close(client_socket);
+            close(client_socket);printf("DEBUG2\n");
             return;
         }
         bytes_received += valread;
@@ -327,13 +367,13 @@ void handleClient(int client_socket) {
     // Validate the message header
     if (header.type != MSG_TYPE_FILE_DATA && header.type != MSG_TYPE_OUTPUT_BINARY) {
         fprintf(stderr, "Invalid message type: %d\n", header.type);
-        close(client_socket);
+        close(client_socket);printf("DEBUG\n");
         return;
     }
 
     if (header.length > MAX_BUFFER_SIZE) {
         fprintf(stderr, "Message length too large: %u\n", header.length);
-        close(client_socket);
+        close(client_socket);printf("DEBUG4\n");
         return;
     }
 
@@ -352,7 +392,7 @@ void handleClient(int client_socket) {
                     perror("Error reading output binary name");
                 }
                 free(output_binary);
-                close(client_socket);
+                close(client_socket);printf("DEBUG5\n");
                 return;
             }
             size_t remaining_bytes = output_binary_length - bytes_received;
@@ -373,14 +413,27 @@ void handleClient(int client_socket) {
         snprintf(command, 2048, "gcc -c %s %s %s", file_path, "-o", path_to_output_binary);
 
         printf("Running command: %s\n", command);
-
         int result = system(command);
+//        sleep(1); // here i am simulating long compilation
         if (result != 0) {
             perror("Compilation failed");
+            close(client_socket);printf("DEBUG6\n");
+            free(output_binary);
+            return;
+        }
+
+        printf("cOMPILED FILE");
+
+        memset(&header, 0, sizeof(MessageHeader));
+        header.type = MSG_TYPE_COMPILED_FILE_READY;
+        header.length = 0; // No data for this message type
+        if (send(client_socket, &header, sizeof(MessageHeader), 0) < 0) {
+            perror("Error sending compiled file ready message");
             close(client_socket);
             free(output_binary);
             return;
         }
+        printf("SEND FLAG REDY FILE");
 
         // Send compiled file back to client
         FILE *compiled_file = fopen(path_to_output_binary, "rb"); // Open the compiled file
@@ -391,12 +444,24 @@ void handleClient(int client_socket) {
             return;
         }
 
+        printf("SEMNNDING FILE");
+
         char send_buffer[MAX_BUFFER_SIZE];
         size_t bytes_read;
-        printf("HERERERERE: %lu\n", sizeof(send_buffer));
+        memset(send_buffer, 0, sizeof(send_buffer));
         while ((bytes_read = fread(send_buffer, 1, sizeof(send_buffer), compiled_file)) > 0) {
-            if (send(client_socket, send_buffer, bytes_read, 0) == -1) {
-                perror("Error sending compiled file");
+            size_t bytes_sent = 0;
+            while (bytes_sent < bytes_read) {
+                ssize_t sent = send(client_socket, send_buffer + bytes_sent, bytes_read - bytes_sent, 0);
+
+                printf("sent %zd", sent);
+                if (sent == -1) {
+                    perror("Error sending compiled file");
+                    break;
+                }
+                bytes_sent += sent;
+            }
+            if (bytes_sent != bytes_read) {
                 break;
             }
         }
@@ -411,13 +476,20 @@ void handleClient(int client_socket) {
         free(output_binary);
     } else {
         perror("Unexpected message type");
-        close(client_socket);
+        printf("header.type: %hhu\n header.length: %u\n", header.type, header.length);
+        close(client_socket);printf("DEBUG8\n");
         return;
     }
 
     // Close client socket after sending the file
-    close(client_socket);
+    close(client_socket);printf("DEBUG9\n");
     free(file_path);
+}
+
+void sigchld_handler(__attribute__((unused)) int sig) {
+    while (waitpid(-1, NULL, WNOHANG) > 0) {
+        client_count--;
+    }
 }
 
 int main() {
@@ -426,16 +498,17 @@ int main() {
     int server_fd, client_socket;
     struct sockaddr_in address;
     int addrlen = sizeof(address);
+
+    signal(SIGCHLD, sigchld_handler);
+
     // Create socket file descriptor
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         perror("Socket creation failed");
         exit(EXIT_FAILURE);
     }
-//    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-//        perror("setsockopt(SO_REUSEADDR) failed");
-//        close(server_fd);
-//        exit(EXIT_FAILURE);
-//    }
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
 
     // Initialize address structure
     address.sin_family = AF_INET;
@@ -464,8 +537,62 @@ int main() {
             printf("ACCEPTED\n");
         }
 
-        // Handle client
-        handleClient(client_socket);
+        printf("client_count: %d\n", client_count);
+
+
+
+        MessageHeader header;
+        memset(&header, 0, sizeof(MessageHeader));
+        ssize_t bytes_received = recv(client_socket, &header, sizeof(MessageHeader), 0);
+        if (bytes_received <= 0) {
+            perror("Error reading message header");
+            close(client_socket);printf("DEBUG11\n");
+            continue;
+        }
+        printf("sssssssheader.type: %hhu\n header.length: %u\n", header.type, header.length);
+
+        if (header.type == MSG_TYPE_CHECK_READINESS) {
+
+            if (client_count >= MAX_CLIENTS) {
+                memset(&header, 0, sizeof(MessageHeader));
+                header.type = MSG_TYPE_SERVER_NOT_READY;
+                header.length = 0;
+                send(client_socket, &header, sizeof(MessageHeader), 0);
+                printf("MAXCLIENTSheader.type: %hhu\n header.length: %u\n", header.type, header.length);
+                close(client_socket);printf("DEBUG10\n");
+                continue;
+            }
+
+            memset(&header, 0, sizeof(MessageHeader));
+            header.type = MSG_TYPE_SERVER_READY;
+            header.length = 0;
+
+            send(client_socket, &header, sizeof(MessageHeader), 0);
+            memset(&header, 0, sizeof(MessageHeader));
+        } else {
+            perror("Unexpected message type");
+            printf("header.type: %hhu\n header.length: %u\n", header.type, header.length);
+            close(client_socket);printf("DEBUG12\n");
+            continue;
+        }
+
+//        handleClient(client_socket);
+        pid_t child_pid = fork();
+        if (child_pid == -1) {
+            perror("Fork failed");
+            close(client_socket);printf("DEBUG13\n");
+            continue;
+        } else if (child_pid == 0) {
+            // Child process
+            printf("Child process\n");
+            handleClient(client_socket);
+            exit(EXIT_SUCCESS);
+        } else {
+            // Parent process
+            printf("Parent process\n");
+            close(client_socket);printf("DEBUG14\n");
+            client_count++;
+        }
     }
 
     return 0;
