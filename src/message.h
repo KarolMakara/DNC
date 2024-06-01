@@ -2,6 +2,7 @@
 #define MESSAGE_H
 
 #include <stdint.h>
+#include <stdio.h>
 
 #define MSG_TYPE_FILE_DATA 1
 #define MSG_TYPE_OUTPUT_BINARY 2
@@ -16,6 +17,8 @@ typedef struct {
     uint32_t length;
 } MessageHeader;
 
-void send_message_header(int client_socket, MessageHeader header);
+void send_message_header(int client_socket, uint32_t data_length, uint8_t FLAG);
+MessageHeader receive_message_header(int socket, int *error_flag);
+int send_message(int client_socket, const char* data, size_t data_size);
 
 #endif // MESSAGE_H

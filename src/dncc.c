@@ -6,119 +6,83 @@
 #include <stdint.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <stdbool.h>
 #include <fcntl.h>
 #include <sys/time.h>
-
+#include <time.h>
 
 #include "message.h"
+#include "constants.h"
 
 
-#define PORT 8080
-#define INITIAL_BUFFER_SIZE 16384 //todo fix pointer realloc and add to server
-#define MAX_COMMAND_LENGTH 1024
-#define MAX_BINARY_NAME_LENGTH 128
-#define MAX_RETRIES 5
-#define RETRY_DELAY 1
-#define MAX_SERVERS 10
+int receiveACK(int socket) {
+    int error_no = 0;
+    MessageHeader header = receive_message_header(socket, &error_no);
 
-
-
-int send_message(int client_socket, const char* data, size_t data_size) {
-    if (send(client_socket, data, data_size, 0) < 0) {
-        perror("Sending message failed");
-        close(client_socket);
-        return 1;
-    }
-    return 0;
-}
-
-void receiveACK(int socket_fd) {
-    MessageHeader header;
-    ssize_t bytes_received = recv(socket_fd, &header, sizeof(MessageHeader), 0);
-    if (bytes_received == -1) {
-        perror("Receive failed");
-        exit(EXIT_FAILURE);
+    if (error_no == -1) {
+        close(socket);
+        return -1;
     }
 
     if (header.type != MSG_TYPE_ACK) {
         fprintf(stderr, "Expected ACK, received message type: %u\n", header.type);
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     if (header.length != 0) {
         fprintf(stderr, "Invalid ACK length: %u\n", header.length);
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     printf("Received ACK from server\n");
+    return 0;
 }
 
 
 int isServerReady(int client_socket) {
-    MessageHeader header;
-    memset(&header, 0, sizeof(MessageHeader));
-    header.type = MSG_TYPE_CHECK_READINESS;
-    header.length = 12333333;
-    send_message_header(client_socket, header);
-    printf("SEND header.type: %hhu\n header.length: %u\n", header.type, header.length);
-    memset(&header, 0, sizeof(MessageHeader));
 
-    ssize_t bytes_received = recv(client_socket, &header, sizeof(MessageHeader), 0);
-    printf("RECV header.type: %hhu\n header.length: %u\n", header.type, header.length);
-    if (bytes_received == -1) {
-        perror("Receive failed");
-        return 0;
+    send_message_header(client_socket, 0, MSG_TYPE_CHECK_READINESS);
+
+    int error_no = 0;
+    MessageHeader header = receive_message_header(client_socket, &error_no);
+
+    if (error_no == -1) {
+        close(client_socket);
+        return -1;
     }
 
     if (header.type == MSG_TYPE_SERVER_READY) {
-        memset(&header, 0, sizeof(MessageHeader));
-        return 1;
+        return 0;
     } else if (header.type == MSG_TYPE_SERVER_NOT_READY) {
         printf("Server is not ready for compilation.\n");
-        return 0;
+        return -1;
     } else {
         fprintf(stderr, "Unexpected message type: %u\n", header.type);
-        return 0;
+        return -1;
     }
 }
 
 int sendFileToServer(int client_socket, const char *data, size_t data_length, const char *output_binary) {
 
-    if (!isServerReady(client_socket)) {
-        fprintf(stderr, "Server is not ready for compilation.\n");
-        return 1;
-    } else {
-        printf("Server is ready for compilation.\n");
-        
-    }
-    MessageHeader header;
-    memset(&header, 0, sizeof(MessageHeader));
-    header.type = MSG_TYPE_FILE_DATA;
-    header.length = (uint32_t)data_length;
+    send_message_header(client_socket, (uint32_t)data_length, MSG_TYPE_FILE_DATA);
 
-    send_message_header(client_socket, header);
-    printf("SENDFILE1header.type: %hhu\n header.length: %u\n", header.type, header.length);
-    //not accessible
-    if (send_message(client_socket, data, data_length)) {
+    if (send_message(client_socket, data, data_length) == -1) {
         fprintf(stderr, "Failed to send file data.\n");
-        return 1;
+        return -1;
     }
 
-    receiveACK(client_socket);
+
+    if (receiveACK(client_socket) == -1) {
+        printf("Client did not received ACK message.\n");
+        return -1;
+    }
 
     size_t output_binary_length = strlen(output_binary);
 
-    memset(&header, 0, sizeof(MessageHeader));
-    header.type = MSG_TYPE_OUTPUT_BINARY;
-    header.length = (uint32_t)output_binary_length;
+    send_message_header(client_socket, (uint32_t)output_binary_length, MSG_TYPE_OUTPUT_BINARY);
 
-    send_message_header(client_socket, header);
-    printf("SENDFILE2header.type: %hhu\n header.length: %u\n", header.type, header.length);
-
-    if (send_message(client_socket, output_binary, output_binary_length)) {
+    if (send_message(client_socket, output_binary, output_binary_length) == -1) {
         fprintf(stderr, "Failed to send output binary name.\n");
-        return 1;
+        return -1;
     }
 
     return 0;
@@ -143,60 +107,48 @@ void receiveCompiledFile(int client_socket, const char *output_filename) {
         return;
     }
 
-    // Set the socket to non-blocking mode
     int flags = fcntl(client_socket, F_GETFL, 0);
     fcntl(client_socket, F_SETFL, flags | O_NONBLOCK);
 
     fd_set read_fds;
-    struct timeval timeout;
 
-    while (1) {
-        FD_ZERO(&read_fds);
-        FD_SET(client_socket, &read_fds);
+    FD_ZERO(&read_fds);
+    FD_SET(client_socket, &read_fds);
 
-        timeout.tv_sec = 5; // Set the desired timeout value in seconds
-        timeout.tv_usec = 0;
 
-        int select_result = select(client_socket + 1, &read_fds, NULL, NULL, &timeout);
-
-        if (select_result == -1) {
-            perror("Error in select");
-            break;
-        } else if (select_result == 0) {
-            printf("Timeout occurred while waiting for data.\n");
-            break;
-        } else {
-            bytes_received = recv(client_socket, buffer, buffer_size, 0);
-            if (bytes_received == 0) {
-                // Server closed the connection
-                break;
-            }
-
-            fwrite(buffer, 1, bytes_received, output_file);
-            total_received += bytes_received;
-
-            if (bytes_received == buffer_size) {
-                buffer_size *= 2;
-                char *new_buffer = realloc(buffer, buffer_size);
-                if (new_buffer == NULL) {
-                    perror("Error reallocating memory");
-                    break;
-                }
-                buffer = new_buffer;
-            }
-        }
+    int select_result = select(client_socket + 1, &read_fds, NULL, NULL, NULL);
+    if (select_result == -1) {
+        perror("Error in select");
+    } else if (select_result == 0) {
+        printf("Timeout occurred while waiting for data.\n");
     }
 
-    if (total_received > 0) {
-        printf("Compiled file received from server and saved as %s.\n", output_filename);
-    } else {
-        printf("No data received, not writing to file.\n");
+    while (1) {
+
+
+        bytes_received = recv(client_socket, buffer, buffer_size, 0);
+        if (bytes_received == 0) {
+            break;
+        }
+
+        fwrite(buffer, 1, bytes_received, output_file);
+        total_received += bytes_received;
+
+        if (bytes_received == buffer_size) {
+            buffer_size *= 2;
+            char *new_buffer = realloc(buffer, buffer_size);
+            if (new_buffer == NULL) {
+                perror("Error reallocating memory");
+                break;
+            }
+            buffer = new_buffer;
+        }
     }
 
     fclose(output_file);
     free(buffer);
 
-    // Set the socket back to blocking mode
+// Set the socket back to blocking mode
     fcntl(client_socket, F_SETFL, flags);
 }
 
@@ -214,10 +166,66 @@ char* extractBinaryName(const char* path) {
     return binaryName;
 }
 
+char **read_server_list(const char *filename, int *server_count) {
+    char **server_list = NULL;
+    *server_count = 0;
+    FILE *server_file = fopen(filename, "r");
+    if (server_file == NULL) {
+        perror("Error opening server list file");
+        return NULL;
+    }
+
+    char line[32];
+    while (fgets(line, sizeof(line), server_file) != NULL) {
+        char *newline = strchr(line, '\n');
+        if (newline != NULL) {
+            *newline = '\0';
+        }
+
+        char **new_server_list = realloc(server_list, (*server_count + 1) * sizeof(char *));
+        if (new_server_list == NULL) {
+            perror("Error allocating memory for server list");
+            fclose(server_file);
+            for (int i = 0; i < *server_count; i++) {
+                free(server_list[i]);
+            }
+            free(server_list);
+            return NULL;
+        }
+        server_list = new_server_list;
+
+        server_list[*server_count] = strdup(line);
+        if (server_list[*server_count] == NULL) {
+            perror("Error allocating memory for server address");
+            fclose(server_file);
+            for (int i = 0; i < *server_count; i++) {
+                free(server_list[i]);
+            }
+            free(server_list);
+            return NULL;
+        }
+
+        (*server_count)++;
+    }
+
+    fclose(server_file);
+    return server_list;
+}
+
+void shuffle(char **server_list, int server_count) {
+    srand(time(NULL));
+    for (int i = server_count - 1; i > 0; i--) {
+        int j = rand() % (i + 1);
+        char *temp = server_list[i];
+        server_list[i] = server_list[j];
+        server_list[j] = temp;
+    }
+}
+
 
 int main(int argc, char *argv[]) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: %s gcc <gcc_opts> \n", argv[0]);
+        fprintf(stderr, "Usage: %s gcc/g++ <gcc_opts> \n", argv[0]);
         return 1;
     }
 
@@ -225,31 +233,23 @@ int main(int argc, char *argv[]) {
     char *preprocess_output_file = NULL;
     char *output_binary = NULL;
 
-    bool is_output_name = false;
-    bool link_only = true;
+    int is_output_name = -1;
+    int link_only = 0;
 
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
-            printf("DEBUG 4.1\n");
             output_binary = strdup(argv[i + 1]);
-            printf("DEBUG 4.2\n");
-            is_output_name = true;
+            is_output_name = 0;
         } else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
-            printf("DEBUG 4.1\n");
             source_file = strdup(argv[i + 1]);
-            printf("DEBUG 4.2\n");
-            link_only = false;
+            link_only = -1;
         }
-        printf(" %s", argv[i]);
     }
-    printf("\nlink only %d\n", link_only);
-    printf("is_output_name %d\n", is_output_name);
-    printf("output_binary: %s\n", output_binary);
 
 
     char command[MAX_COMMAND_LENGTH] = "";
 
-    if (link_only || !is_output_name) {
+    if (link_only == 0 || is_output_name == -1) {
         for (int i = 1; i < argc; i++) {
             strcat(command, argv[i]);
             strcat(command, " ");
@@ -264,14 +264,14 @@ int main(int argc, char *argv[]) {
         free(source_file);
 
 
-        strcat(command, "gcc ");
-        strcat(command, "-E ");
+        strcat(command, argv[1]);
+        strcat(command, " -E ");
 
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], output_binary) == 0) {
                 strcat(command, preprocess_output_file);
-            } else {
+            } else if (strstr(argv[i], "-c") == NULL) {
                 strcat(command, argv[i]);
             }
             strcat(command, " ");
@@ -280,12 +280,12 @@ int main(int argc, char *argv[]) {
 
 
 
-    printf("Running preprocess command: %s\n", command);
     int status = system(command);
+    printf("Running command:\n %s\n", command);
     if (status == -1) {
         perror("Error in executing command");
         return 1;
-    } else if (link_only || !is_output_name) {
+    } else if (link_only == 0 || is_output_name == -1) {
         return 0;
     }
 
@@ -304,7 +304,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     fseek(file, 0, SEEK_SET);
-    printf("File size: %ld\n", file_size); // Print file size for debugging purposes
 
     char *file_contents = (char *)malloc(file_size + 1);
     if (file_contents == NULL) {
@@ -324,101 +323,84 @@ int main(int argc, char *argv[]) {
 
     free(output_binary);
 
-    char server_list[MAX_SERVERS][32];
     int server_count = 0;
-    FILE *server_file = fopen("server_list.cfg", "r");
-    if (server_file == NULL) {
-        perror("Error opening server list file");
+    char **server_list = read_server_list("server_list.cfg", &server_count);
+    if (server_list == NULL) {
         return 1;
     }
 
-    char line[32];
-    while (fgets(line, sizeof(line), server_file) != NULL && server_count < MAX_SERVERS) {
-        char *newline = strchr(line, '\n');
-        if (newline != NULL) {
-            *newline = '\0';
-        }
-        strncpy(server_list[server_count], line, sizeof(server_list[server_count]) - 1);
-        server_list[server_count][sizeof(server_list[server_count]) - 1] = '\0';
-        server_count++;
-    }
-    fclose(server_file);
+    shuffle(server_list, server_count);
 
+    for (int i = 0; i < server_count; i++) {
+        printf("%s\n", server_list[i]);
+    }
 
     int client_socket = -1;
     int retry_count = 0;
     int server_index = 0;
 
-    while (retry_count < MAX_RETRIES) {
-        struct sockaddr_in server_addr;
-        char ip_addr[16];
-        uint16_t port;
+    struct sockaddr_in server_addr;
+    char ip_addr[16];
+    uint16_t port;
 
+    client_socket = socket(AF_INET, SOCK_STREAM, 0);
+
+    if (client_socket == -1) {
+        perror("Socket creation failed");
+        return 1;
+    }
+
+    int tried_ips = 0;
+
+    while (retry_count < MAX_RETRIES && tried_ips < server_count) {
         if (sscanf(server_list[server_index], "%[^:]:%hu", ip_addr, &port) != 2) {
             fprintf(stderr, "Invalid server address format: %s\n", server_list[server_index]);
+            close(client_socket);
             return 1;
         }
-
-        client_socket = socket(AF_INET, SOCK_STREAM, 0);
-        if (client_socket == -1) {
-            perror("Socket creation failed");
-            return 1;
-        }
-
-        struct timeval timeout;
-        timeout.tv_sec = 5;
-        timeout.tv_usec = 0;
-        setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
         server_addr.sin_family = AF_INET;
         server_addr.sin_port = htons(port);
         if (inet_pton(AF_INET, ip_addr, &server_addr.sin_addr) <= 0) {
             fprintf(stderr, "Invalid IP address: %s\n", ip_addr);
-            close(client_socket);
             server_index = (server_index + 1) % server_count;
-            retry_count++;
+            tried_ips++;
             continue;
         }
 
-        printf("Attempting to connect to server %s:%d (try %d)...\n", ip_addr, port, retry_count + 1);
         if (connect(client_socket, (struct sockaddr *) &server_addr, sizeof(server_addr)) == 0) {
-            printf("Connected to server successfully.\n");
-            if (
-                    sendFileToServer(client_socket, file_contents, file_size, output_binary_name) != 0
-            ) {
+            int server_ready = isServerReady(client_socket);
+            if (server_ready == 0) {
+                if (sendFileToServer(client_socket, file_contents, file_size, output_binary_name) == 0) {
+                    break;
+                }
+            } else {
                 close(client_socket);
-                server_index = (server_index + 1) % server_count;
-                retry_count = 0;
-                printf("DEBUG: !isServerReady(client_socket)");
-                continue;
+                client_socket = socket(AF_INET, SOCK_STREAM, 0);
+                if (client_socket == -1) {
+                    perror("Socket creation failed");
+                    return 1;
+                }
             }
-            break;
-        } else {
-            perror("Connection to server failed");
-            close(client_socket);
-            retry_count++;
-            sleep(RETRY_DELAY);
         }
 
-
+        server_index = (server_index + 1) % server_count;
+        retry_count++;
+        sleep(RETRY_DELAY);
     }
-    free(file_contents);
 
+    int error_no = 0;
+    MessageHeader header = receive_message_header(client_socket, &error_no);
 
-    MessageHeader header;
-    ssize_t bytes_received = recv(client_socket, &header, sizeof(MessageHeader), 0);
-    if (bytes_received <= 0) {
-        perror("Error receiving compiled file ready message");
+    if (error_no == -1) {
         close(client_socket);
-//        continue;
+        return -1;
     }
 
     if (header.type != MSG_TYPE_COMPILED_FILE_READY) {
         fprintf(stderr, "Unexpected message type: %u\n", header.type);
         close(client_socket);
-//        continue;
     }
-    printf("receiveCompiledFile");
     receiveCompiledFile(client_socket, output_binary_name);
 
     close(client_socket);
