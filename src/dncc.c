@@ -6,8 +6,10 @@
 #include <stdint.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <sys/stat.h>
 #include <stdbool.h>
+#include <fcntl.h>
+#include <sys/time.h>
+
 
 #include "message.h"
 
@@ -19,50 +21,8 @@
 #define MAX_RETRIES 5
 #define RETRY_DELAY 1
 #define MAX_SERVERS 10
-#include <time.h>
 
-#include <sys/time.h>
-void print_timestamp() {
-    struct timeval tv;
-    struct tm* timeinfo;
-    char buffer[64];
 
-    // Get the current time including milliseconds
-    gettimeofday(&tv, NULL);
-
-    // Convert the time to local time format
-    timeinfo = localtime(&tv.tv_sec);
-
-    // Format the time into a human-readable string including milliseconds
-    strftime(buffer, sizeof(buffer), "%M:%S", timeinfo);
-    printf("Current timestamp: %s.%05ld\n", buffer, tv.tv_usec);
-}
-int is_binary(const char *filename) {
-    FILE *file = fopen(filename, "rb");
-    if (!file) {
-        perror("Error opening file");
-        return -1;
-    }
-
-    int isBinary = 0;
-    unsigned char buffer[1024];
-    size_t bytesRead;
-
-    while ((bytesRead = fread(buffer, 1, sizeof(buffer), file)) > 0) {
-        for (size_t i = 0; i < bytesRead; ++i) {
-            if (buffer[i] == 0x00) {
-                isBinary = 1;
-                break;
-            }
-        }
-        if (isBinary) {
-            break;
-        }
-    }
-
-    fclose(file);
-    return isBinary;
-}
 
 int send_message(int client_socket, const char* data, size_t data_size) {
     if (send(client_socket, data, data_size, 0) < 0) {
@@ -183,21 +143,47 @@ void receiveCompiledFile(int client_socket, const char *output_filename) {
         return;
     }
 
-    while ((bytes_received = recv(client_socket, buffer, buffer_size, 0)) > 0) {
-        fwrite(buffer, 1, bytes_received, output_file);
-        total_received += bytes_received;
-        printf("total_received %zu, buffer_size %zu\n", total_received, buffer_size);
+    // Set the socket to non-blocking mode
+    int flags = fcntl(client_socket, F_GETFL, 0);
+    fcntl(client_socket, F_SETFL, flags | O_NONBLOCK);
 
-        if (bytes_received == buffer_size) {
-            buffer_size *= 2;
-            char *new_buffer = realloc(buffer, buffer_size);
-            if (new_buffer == NULL) {
-                perror("Error reallocating memory");
-                free(buffer);
-                fclose(output_file);
-                return;
+    fd_set read_fds;
+    struct timeval timeout;
+
+    while (1) {
+        FD_ZERO(&read_fds);
+        FD_SET(client_socket, &read_fds);
+
+        timeout.tv_sec = 5; // Set the desired timeout value in seconds
+        timeout.tv_usec = 0;
+
+        int select_result = select(client_socket + 1, &read_fds, NULL, NULL, &timeout);
+
+        if (select_result == -1) {
+            perror("Error in select");
+            break;
+        } else if (select_result == 0) {
+            printf("Timeout occurred while waiting for data.\n");
+            break;
+        } else {
+            bytes_received = recv(client_socket, buffer, buffer_size, 0);
+            if (bytes_received == 0) {
+                // Server closed the connection
+                break;
             }
-            buffer = new_buffer;
+
+            fwrite(buffer, 1, bytes_received, output_file);
+            total_received += bytes_received;
+
+            if (bytes_received == buffer_size) {
+                buffer_size *= 2;
+                char *new_buffer = realloc(buffer, buffer_size);
+                if (new_buffer == NULL) {
+                    perror("Error reallocating memory");
+                    break;
+                }
+                buffer = new_buffer;
+            }
         }
     }
 
@@ -209,6 +195,9 @@ void receiveCompiledFile(int client_socket, const char *output_filename) {
 
     fclose(output_file);
     free(buffer);
+
+    // Set the socket back to blocking mode
+    fcntl(client_socket, F_SETFL, flags);
 }
 
 
@@ -377,7 +366,7 @@ int main(int argc, char *argv[]) {
         }
 
         struct timeval timeout;
-        timeout.tv_sec = 1;
+        timeout.tv_sec = 5;
         timeout.tv_usec = 0;
         setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 

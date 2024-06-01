@@ -18,144 +18,118 @@
 #define SERVER_DIRECTORY "/tmp/compilation_server"
 #define MAX_CLIENTS 1
 
-#include <time.h>
 
-#include <sys/time.h>
-void print_timestamp() {
-    struct timeval tv;
-    struct tm* timeinfo;
-    char buffer[64];
-
-    // Get the current time including milliseconds
-    gettimeofday(&tv, NULL);
-
-    // Convert the time to local time format
-    timeinfo = localtime(&tv.tv_sec);
-
-    // Format the time into a human-readable string including milliseconds
-    strftime(buffer, sizeof(buffer), "%M:%S", timeinfo);
-    printf("Current timestamp: %s.%05ld\n", buffer, tv.tv_usec);
-}
 int client_count = 0;
 
-char* createHashDirPath(const char *file_hash) {
-    if (file_hash == NULL) {
-        fprintf(stderr, "file_hash is NULL\n");
-        return NULL;
-    }
+//char* createHashDirPath(const char *file_hash) {
+//    if (file_hash == NULL) {
+//        fprintf(stderr, "file_hash is NULL\n");
+//        return NULL;
+//    }
+//
+//    // Determine the length of the concatenated string
+//    size_t dir_len = strlen(SERVER_DIRECTORY);
+//    size_t hash_len = strlen(file_hash);
+//    size_t total_len = dir_len + hash_len + 1; // +1 for the null terminator
+//
+//    // Allocate memory for the concatenated string
+//    char *hash_dir = (char *)malloc(total_len * sizeof(char));
+//    if (hash_dir == NULL) {
+//        perror("Unable to allocate memory");
+//        exit(EXIT_FAILURE);
+//    }
+//
+//    // Copy SERVER_DIRECTORY to the allocated memory
+//    strcpy(hash_dir, SERVER_DIRECTORY);
+//
+//    // Concatenate file_hash to the buffer
+//    strcat(hash_dir, file_hash);
+//
+//    return hash_dir; // Return the dynamically allocated string
+//}
 
-    // Determine the length of the concatenated string
-    size_t dir_len = strlen(SERVER_DIRECTORY);
-    size_t hash_len = strlen(file_hash);
-    size_t total_len = dir_len + hash_len + 1; // +1 for the null terminator
 
-    // Allocate memory for the concatenated string
-    char *hash_dir = (char *)malloc(total_len * sizeof(char));
-    if (hash_dir == NULL) {
-        perror("Unable to allocate memory");
-        exit(EXIT_FAILURE);
-    }
-
-    // Copy SERVER_DIRECTORY to the allocated memory
-    strcpy(hash_dir, SERVER_DIRECTORY);
-
-    // Concatenate file_hash to the buffer
-    strcat(hash_dir, file_hash);
-
-    return hash_dir; // Return the dynamically allocated string
-}
-
-
-char* extractOutputPath(const char* str) {
-    const char* delim = " ";
-    const char* target = "-o";
-    char* token;
-    char* saveptr;
-
-    token = strtok_r((char*)str, delim, &saveptr);
-    while (token != NULL) {
-        if (strcmp(token, target) == 0) {
-            token = strtok_r(NULL, delim, &saveptr); // Get the next token after "-o"
-            if (token != NULL) {
-                return token;
-            } else {
-                return NULL; // If "-o" is the last token, return NULL
-            }
-        }
-        token = strtok_r(NULL, delim, &saveptr);
-    }
-    return NULL; // Return NULL if not found
-}
+//char* extractOutputPath(const char* str) {
+//    const char* delim = " ";
+//    const char* target = "-o";
+//    char* token;
+//    char* saveptr;
+//
+//    token = strtok_r((char*)str, delim, &saveptr);
+//    while (token != NULL) {
+//        if (strcmp(token, target) == 0) {
+//            token = strtok_r(NULL, delim, &saveptr); // Get the next token after "-o"
+//            if (token != NULL) {
+//                return token;
+//            } else {
+//                return NULL; // If "-o" is the last token, return NULL
+//            }
+//        }
+//        token = strtok_r(NULL, delim, &saveptr);
+//    }
+//    return NULL; // Return NULL if not found
+//}
 
 char* extractFilename(const char *original) {
     char *flag_position = strstr(original, "-o");
 
-    if (flag_position != NULL) {
-        // Calculate the position of the filename after '-o' and store it
-        char *filename_position = flag_position + 2; // +2 to move past '-o'
-
-        // Skip any leading spaces
-        while (*filename_position == ' ') {
-            filename_position++;
-        }
-
-        // Find the end of the filename
-        char *filename_end = strchr(filename_position, ' ');
-        if (filename_end == NULL) {
-            // If no space is found, the filename goes to the end of the string
-            filename_end = filename_position + strlen(filename_position);
-        }
-
-        // Calculate the length of the filename
-        size_t filename_length = filename_end - filename_position;
-
-        // Allocate memory for the filename
-        char *filename = (char*)malloc((filename_length + 1) * sizeof(char)); // +1 for null terminator
-
-        // Copy the filename to the allocated memory
-        strncpy(filename, filename_position, filename_length);
-        filename[filename_length] = '\0';
-
-        return filename;
-    } else {
-        //printf("No '-o' flag found.\n");
+    if (flag_position == NULL) {
         return NULL;
     }
-}
+    char *filename_position = flag_position + 2;
 
-void prependPathToFolder(char *original, const char *prefix) {
-    char *filename = extractFilename(original);
-    if (filename != NULL) {
-        size_t prefix_length = strlen(prefix);
-        size_t filename_length = strlen(filename);
-        size_t original_length = strlen(original);
-
-        // Calculate the required buffer size for the new string
-        size_t new_length = prefix_length + filename_length + original_length - filename_length + 1;
-
-        // Allocate a temporary buffer
-        char *temp_buffer = (char *)malloc(new_length * sizeof(char));
-        if (temp_buffer == NULL) {
-            perror("Unable to allocate memory");
-            free(filename);
-            return;
-        }
-
-        // Construct the new string in the temporary buffer
-        strcpy(temp_buffer, prefix);
-        strcat(temp_buffer, filename);
-        strcat(temp_buffer, original + filename_length + prefix_length);
-
-        // Copy the new string back to the original buffer
-        strcpy(original, temp_buffer);
-
-        // Free the temporary buffer and the extracted filename
-        free(temp_buffer);
-        free(filename);
-    } else {
-        printf("No filename found.\n");
+    while (*filename_position == ' ') {
+        filename_position++;
     }
+
+    char *filename_end = strchr(filename_position, ' ');
+    if (filename_end == NULL) {
+        filename_end = filename_position + strlen(filename_position);
+    }
+
+    size_t filename_length = filename_end - filename_position;
+
+    char *filename = (char*)malloc((filename_length + 1) * sizeof(char)); // +1 for null terminator
+
+    strncpy(filename, filename_position, filename_length);
+    filename[filename_length] = '\0';
+
+    return filename;
 }
+
+//void prependPathToFolder(char *original, const char *prefix) {
+//    char *filename = extractFilename(original);
+//    if (filename != NULL) {
+//        size_t prefix_length = strlen(prefix);
+//        size_t filename_length = strlen(filename);
+//        size_t original_length = strlen(original);
+//
+//        // Calculate the required buffer size for the new string
+//        size_t new_length = prefix_length + filename_length + original_length - filename_length + 1;
+//
+//        // Allocate a temporary buffer
+//        char *temp_buffer = (char *)malloc(new_length * sizeof(char));
+//        if (temp_buffer == NULL) {
+//            perror("Unable to allocate memory");
+//            free(filename);
+//            return;
+//        }
+//
+//        // Construct the new string in the temporary buffer
+//        strcpy(temp_buffer, prefix);
+//        strcat(temp_buffer, filename);
+//        strcat(temp_buffer, original + filename_length + prefix_length);
+//
+//        // Copy the new string back to the original buffer
+//        strcpy(original, temp_buffer);
+//
+//        // Free the temporary buffer and the extracted filename
+//        free(temp_buffer);
+//        free(filename);
+//    } else {
+//        printf("No filename found.\n");
+//    }
+//}
 
 
 void sha256(const char *str, char *hash) {
@@ -194,30 +168,28 @@ int createDirectory(const char *path) {
     return 0;
 }
 
-char* extractDirectoryFromPath(const char *path) {
-    // Find the last occurrence of the directory separator '/'
-    const char *last_separator = strrchr(path, '/');
+//char* extractDirectoryFromPath(const char *path) {
+//    // Find the last occurrence of the directory separator '/'
+//    const char *last_separator = strrchr(path, '/');
+//
+//    if (last_separator != NULL) {
+//        // Calculate the length of the directory path
+//        size_t directory_length = last_separator - path + 1;
+//
+//        // Allocate memory for the directory path
+//        char *directory = (char*)malloc((directory_length + 1) * sizeof(char)); // +1 for null terminator
+//
+//        // Copy the directory path to the allocated memory
+//        strncpy(directory, path, directory_length);
+//        directory[directory_length] = '\0';
+//
+//        return directory;
+//    } else {
+//        printf("No directory separator found in the path.\n");
+//        return NULL;
+//    }
+//}
 
-    if (last_separator != NULL) {
-        // Calculate the length of the directory path
-        size_t directory_length = last_separator - path + 1;
-
-        // Allocate memory for the directory path
-        char *directory = (char*)malloc((directory_length + 1) * sizeof(char)); // +1 for null terminator
-
-        // Copy the directory path to the allocated memory
-        strncpy(directory, path, directory_length);
-        directory[directory_length] = '\0';
-
-        return directory;
-    } else {
-        printf("No directory separator found in the path.\n");
-        return NULL;
-    }
-}
-
-
-// Function to receive file data from the client and save it
 char* receiveFile(int client_socket, size_t data_length) {
     size_t buffer_size = MAX_BUFFER_SIZE;
     char *buffer = (char *)malloc(buffer_size);
@@ -230,7 +202,7 @@ char* receiveFile(int client_socket, size_t data_length) {
     char *file_data = (char *)malloc(data_length + 1);
     if (file_data == NULL) {
         perror("Error allocating memory for file data");
-        free(buffer); // Free buffer before returning
+        free(buffer);
         return NULL;
     }
 
@@ -239,8 +211,8 @@ char* receiveFile(int client_socket, size_t data_length) {
         size_t bytes_read = read(client_socket, buffer, buffer_size);
         if (bytes_read <= 0) {
             perror("Error reading file data");
-            free(file_data); // Free file_data before returning
-            free(buffer); // Free buffer before returning
+            free(file_data);
+            free(buffer);
             return NULL;
         }
 
@@ -249,14 +221,13 @@ char* receiveFile(int client_socket, size_t data_length) {
         memcpy(file_data + total_received, buffer, bytes_to_copy);
         total_received += bytes_to_copy;
 
-        // Extend the buffer size if necessary
         if (bytes_read == buffer_size) {
             buffer_size *= 2;
             char *new_buffer = (char *)realloc(buffer, buffer_size);
             if (new_buffer == NULL) {
                 perror("Error reallocating memory for buffer");
-                free(file_data); // Free file_data before returning
-                free(buffer); // Free buffer before returning
+                free(file_data);
+                free(buffer);
                 return NULL;
             }
             buffer = new_buffer;
@@ -264,16 +235,16 @@ char* receiveFile(int client_socket, size_t data_length) {
     }
     file_data[data_length] = '\0';
 
-    char file_hash[65]; // SHA-256 hash is 64 characters + null terminator
+    char file_hash[65];
     sha256(file_data, file_hash);
 
     createDirectory(SERVER_DIRECTORY);
 
-    char *file_path = (char *)malloc(strlen(SERVER_DIRECTORY) + strlen(file_hash) + 4 + 1); // +4 for ".c" and +1 for null terminator
+    char *file_path = (char *)malloc(strlen(SERVER_DIRECTORY) + strlen(file_hash) + 4 + 1);
     if (file_path == NULL) {
         perror("Error allocating memory for file path");
-        free(file_data); // Free file_data before returning
-        free(buffer); // Free buffer before returning
+        free(file_data);
+        free(buffer);
         return NULL;
     }
     snprintf(file_path, strlen(SERVER_DIRECTORY) + strlen(file_hash) + 4 + 1, "%s/%s.c", SERVER_DIRECTORY, file_hash);
@@ -281,17 +252,16 @@ char* receiveFile(int client_socket, size_t data_length) {
     FILE *file = fopen(file_path, "w");
     if (file == NULL) {
         perror("Error opening file for writing");
-        free(file_data); // Free file_data before returning
-        free(file_path); // Free file_path before returning
-        free(buffer); // Free buffer before returning
+        free(file_data);
+        free(file_path);
+        free(buffer);
         return NULL;
     }
     fputs(file_data, file);
     fclose(file);
 
-    // Free allocated memory
     free(file_data);
-    free(buffer); // Free buffer here, as it's no longer needed
+    free(buffer);
     return file_path;
 }
 
@@ -383,7 +353,7 @@ void handleClient(int client_socket) {
 
         bytes_received = 0;
         while (bytes_received < output_binary_length) {
-            ssize_t valread = read(client_socket, buffer, MAX_BUFFER_SIZE);
+            valread = read(client_socket, buffer, MAX_BUFFER_SIZE);
             if (valread <= 0) {
                 if (valread == 0) {
                     // Client closed the connection unexpectedly
@@ -404,7 +374,7 @@ void handleClient(int client_socket) {
 
         printf("Output binary: %s\n", output_binary);
 
-        char path_to_output_binary[1024]; // Assuming a maximum length of 1024 characters
+        char path_to_output_binary[1024];
         snprintf(path_to_output_binary, sizeof(path_to_output_binary), "%s/%s", SERVER_DIRECTORY, output_binary);
 
         printf("Path to output binary: %s\n", path_to_output_binary);
@@ -414,7 +384,7 @@ void handleClient(int client_socket) {
 
         printf("Running command: %s\n", command);
         int result = system(command);
-//        sleep(1); // here i am simulating long compilation
+        sleep(1);
         if (result != 0) {
             perror("Compilation failed");
             close(client_socket);printf("DEBUG6\n");
@@ -426,7 +396,7 @@ void handleClient(int client_socket) {
 
         memset(&header, 0, sizeof(MessageHeader));
         header.type = MSG_TYPE_COMPILED_FILE_READY;
-        header.length = 0; // No data for this message type
+        header.length = 0;
         if (send(client_socket, &header, sizeof(MessageHeader), 0) < 0) {
             perror("Error sending compiled file ready message");
             close(client_socket);
@@ -435,8 +405,7 @@ void handleClient(int client_socket) {
         }
         printf("SEND FLAG REDY FILE");
 
-        // Send compiled file back to client
-        FILE *compiled_file = fopen(path_to_output_binary, "rb"); // Open the compiled file
+        FILE *compiled_file = fopen(path_to_output_binary, "rb");
         if (compiled_file == NULL) {
             perror("Error opening compiled file");
             close(client_socket);
@@ -481,7 +450,6 @@ void handleClient(int client_socket) {
         return;
     }
 
-    // Close client socket after sending the file
     close(client_socket);printf("DEBUG9\n");
     free(file_path);
 }
@@ -501,7 +469,6 @@ int main() {
 
     signal(SIGCHLD, sigchld_handler);
 
-    // Create socket file descriptor
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         perror("Socket creation failed");
         exit(EXIT_FAILURE);
@@ -510,18 +477,15 @@ int main() {
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
 
-    // Initialize address structure
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(PORT);
 
-    // Bind socket to address
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         perror("Bind failed");
         exit(EXIT_FAILURE);
     }
 
-    // Listen for incoming connections
     if (listen(server_fd, 3) < 0) {
         perror("Listen failed");
         exit(EXIT_FAILURE);
@@ -583,12 +547,10 @@ int main() {
             close(client_socket);printf("DEBUG13\n");
             continue;
         } else if (child_pid == 0) {
-            // Child process
             printf("Child process\n");
             handleClient(client_socket);
             exit(EXIT_SUCCESS);
         } else {
-            // Parent process
             printf("Parent process\n");
             close(client_socket);printf("DEBUG14\n");
             client_count++;
