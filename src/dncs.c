@@ -117,6 +117,7 @@ char* receiveFile(int client_socket, size_t data_length) {
         perror("Error allocating memory for file path");
         free(file_data);
         free(buffer);
+        free(worker_dir);
         return NULL;
     }
     snprintf(file_path, strlen(worker_dir) + 
@@ -128,6 +129,7 @@ char* receiveFile(int client_socket, size_t data_length) {
         free(file_data);
         free(file_path);
         free(buffer);
+        free(worker_dir);
         return NULL;
     }
     fputs(file_data, file);
@@ -135,6 +137,7 @@ char* receiveFile(int client_socket, size_t data_length) {
 
     free(file_data);
     free(buffer);
+    free(worker_dir);
     return file_path;
 }
 
@@ -174,7 +177,7 @@ void handleClient(int client_socket) {
         ssize_t valread = read(client_socket, ((char *)&header) + bytes_received, sizeof(MessageHeader) - bytes_received);
         if (valread <= 0) {
             perror("Error reading message header");
-            close(client_socket);printf("DEBUG2\n");
+            close(client_socket);
             return;
         }
         bytes_received += valread;
@@ -182,7 +185,7 @@ void handleClient(int client_socket) {
 
     if (header.type != MSG_TYPE_OUTPUT_BINARY) {
         fprintf(stderr, "Invalid message type: %d\n", header.type);
-        close(client_socket);printf("DEBUG\n");
+        close(client_socket);
         return;
     }
 
@@ -267,7 +270,6 @@ void handleClient(int client_socket) {
 
     int result = system(command);
     printf("Running command:\n %s\n", command);
-    sleep(1);
     if (result != 0) {
         perror("Compilation failed");
         close(client_socket);

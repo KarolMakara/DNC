@@ -4,15 +4,17 @@ set(SERVER_SOURCE dncs.c
         message.c
         constants.h
         file_operations.c
-        file_operations.h)
+        file_operations.h
+        networking.h
+        networking.c)
 set(CLIENT_SOURCE dncc.c
         message.h
         message.c
         constants.h
         file_operations.c
         file_operations.h
-        connect_wait.c
-        connect_wait.h)
+        networking.c
+        networking.h)
 
 # Create executable for the server
 add_executable(dncs ${SERVER_SOURCE})

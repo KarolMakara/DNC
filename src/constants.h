@@ -14,6 +14,6 @@
 
 #define PORT 8080
 #define SERVER_DIRECTORY "/tmp/compilation_server"
-#define MAX_CLIENTS 2
+#define MAX_CLIENTS 1
 
 #endif //COMPILATIONSERVER_CONSTANTS_H
