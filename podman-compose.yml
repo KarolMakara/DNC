@@ -1,0 +1,65 @@
+version: "3.9"
+services:
+  compilation_server1:
+    image: compilation_server
+    networks:
+      custom_network:
+        ipv4_address: 10.89.0.2
+    ports:
+      - "8081:8080"
+  compilation_server2:
+    image: compilation_server
+    networks:
+      custom_network:
+        ipv4_address: 10.89.0.3
+    ports:
+      - "8082:8080"
+  compilation_server3:
+    image: compilation_server
+    networks:
+      custom_network:
+        ipv4_address: 10.89.0.4
+    ports:
+      - "8083:8080"
+  compilation_server4:
+    image: compilation_server
+    networks:
+      custom_network:
+        ipv4_address: 10.89.0.5
+    ports:
+      - "8084:8080"
+  compilation_server5:
+    image: compilation_server
+    networks:
+      custom_network:
+        ipv4_address: 10.89.0.6
+    ports:
+      - "8085:8080"
+  compilation_server6:
+    image: compilation_server
+    networks:
+      custom_network:
+        ipv4_address: 10.89.0.7
+    ports:
+      - "8086:8080"
+  compilation_server7:
+    image: compilation_server
+    networks:
+      custom_network:
+        ipv4_address: 10.89.0.8
+    ports:
+      - "8087:8080"
+  compilation_server8:
+    image: compilation_server
+    networks:
+      custom_network:
+        ipv4_address: 10.89.0.9
+    ports:
+      - "8088:8080"
+
+networks:
+  custom_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.89.0.0/24

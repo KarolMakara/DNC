@@ -10,5 +10,6 @@
 #define FILE_TYPE_CPP 323
 
 int check_file_type(const char *file_path);
+void create_directory(const char *output_file_path);
 
 #endif //COMPILATIONSERVER_FILE_OPERATIONS_H

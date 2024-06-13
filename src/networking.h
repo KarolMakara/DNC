@@ -22,7 +22,7 @@ int connect_with_timeout(int socket, struct sockaddr_in server_addr, struct time
 int remove_socket_timout(int socket);
 int receiveACK(int socket);
 int isServerReady(int client_socket);
-int sendFileToServer(int client_socket, const char *data, size_t data_length, const char *output_binary);
+int sendFileToServer(int client_socket, const char *data, size_t data_length, const char *output_binary, uint16_t file_type);
 void receiveCompiledFile(int client_socket, const char *output_filename);
 
 #endif //COMPILATIONSERVER_NETWORKING_H

@@ -1,7 +1,6 @@
 FROM gcc:latest as builder
 
-RUN apt update && apt install -y cmake
-
+RUN apt update && apt install -y cmake valgrind
 
 WORKDIR /app
 
@@ -17,7 +16,5 @@ RUN cmake ..
 
 RUN make
 
-FROM gcc AS run-time
-COPY --from=builder /app/build/src/dncs /usr/bin/
-
-ENTRYPOINT /usr/bin/dncs
+#ENTRYPOINT valgrind -s --track-fds=yes --track-origins=yes --leak-check=full --show-leak-kinds=all /app/build/src/dncs
+ENTRYPOINT /app/build/src/dncs

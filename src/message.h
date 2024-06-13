@@ -13,11 +13,11 @@
 #define MSG_TYPE_COMPILED_FILE_READY 7
 
 typedef struct {
-    uint8_t type;
+    uint16_t type;
     uint32_t length;
 } MessageHeader;
 
-void send_message_header(int client_socket, uint32_t data_length, uint8_t FLAG);
+void send_message_header(int client_socket, uint32_t data_length, uint16_t FLAG);
 MessageHeader receive_message_header(int socket, int *error_flag);
 int send_message(int client_socket, const char* data, size_t data_size);
 

@@ -18,6 +18,7 @@
 #include "message.h"
 #include "constants.h"
 #include "networking.h"
+#include "file_operations.h"
 
 
 // set socket to non-blocking mode, and set desired timeout
@@ -129,6 +130,7 @@ int isServerReady(int client_socket) {
     }
 
     if (header.type == MSG_TYPE_SERVER_READY) {
+        printf("Server is ready for compilation.\n");
         return 0;
     } else if (header.type == MSG_TYPE_SERVER_NOT_READY) {
         printf("Server is not ready for compilation.\n");
@@ -140,7 +142,7 @@ int isServerReady(int client_socket) {
 }
 
 
-int sendFileToServer(int client_socket, const char *data, size_t data_length, const char *output_binary) {
+int sendFileToServer(int client_socket, const char *data, size_t data_length, const char *output_binary, uint16_t file_type) {
 
     send_message_header(client_socket, (uint32_t)data_length, MSG_TYPE_FILE_DATA);
 
@@ -151,12 +153,15 @@ int sendFileToServer(int client_socket, const char *data, size_t data_length, co
 
 
     if (receiveACK(client_socket) == -1) {
-        printf("Client did not received ACK message.\n");
+//        printf("Client did not received ACK message.\n");
         return -1;
     }
 
-    size_t output_binary_length = strlen(output_binary);
+    printf("DEDEDEDEBUG: %d\n", file_type);
+    send_message_header(client_socket, 0, file_type);
+    printf("DEDEDEDEBUG: %d\n", file_type);
 
+    size_t output_binary_length = strlen(output_binary);
     send_message_header(client_socket, (uint32_t)output_binary_length, MSG_TYPE_OUTPUT_BINARY);
 
     if (send_message(client_socket, output_binary, output_binary_length) == -1) {
@@ -178,18 +183,7 @@ void receiveCompiledFile(int client_socket, const char *output_file_path) {
     size_t buffer_size = INITIAL_BUFFER_SIZE;
     size_t bytes_received;
 
-    printf("DEBUG output_file_path %s\n", output_file_path);
-
-    char *last_slash = strrchr(output_file_path, '/');
-    if (last_slash != NULL) {
-        *last_slash = '\0';
-        if (mkdir(output_file_path, 0777) == -1 && errno != EEXIST) {
-            perror("Error creating directory");
-            free(buffer);
-            return;
-        }
-        *last_slash = '/';
-    }
+    create_directory(output_file_path);
 
     FILE *output_file = fopen(output_file_path, "wb");
     if (output_file == NULL) {
@@ -211,7 +205,7 @@ void receiveCompiledFile(int client_socket, const char *output_file_path) {
     if (select_result == -1) {
         perror("Error in select");
     } else if (select_result == 0) {
-        printf("Timeout occurred while waiting for data.\n");
+//        printf("Timeout occurred while waiting for data.\n");
     }
 
     size_t total_received = 0;
@@ -237,8 +231,6 @@ void receiveCompiledFile(int client_socket, const char *output_file_path) {
             buffer = new_buffer;
         }
     }
-
-    printf("Saved file %s\n", output_file_path);
 
     fclose(output_file);
     free(buffer);

@@ -171,6 +171,13 @@ void handleClient(int client_socket) {
 
     send_message_header(client_socket, 0, MSG_TYPE_ACK);
 
+    uint16_t file_type;
+    error_no = 0;
+    header = receive_message_header(client_socket, &error_no);
+    file_type = header.type;
+
+    printf("FILETYPEEEEE: %d\n", file_type);
+
     size_t bytes_received = 0;
 
     while (bytes_received < sizeof(MessageHeader)) {
@@ -252,7 +259,6 @@ void handleClient(int client_socket) {
 
     char command_holder[16];
 
-    int file_type = check_file_type(file_path);
 
     if (file_type == FILE_TYPE_C) {
         strcpy(command_holder, "gcc -c %s %s %s");
@@ -317,10 +323,10 @@ void handleClient(int client_socket) {
         }
     }
 
-    if (remove(file_path) == 0 && remove(path_to_output_binary) == 0) {
-    } else {
-        perror("Error deleting file");
-    }
+//    if (remove(file_path) == 0 && remove(path_to_output_binary) == 0) {
+//    } else {
+//        perror("Error deleting file");
+//    }
 
     free(send_buffer);
     fclose(compiled_file);
