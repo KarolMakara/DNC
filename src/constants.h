@@ -8,12 +8,13 @@
 #define INITIAL_BUFFER_SIZE 2048
 #define MAX_COMMAND_LENGTH 1024
 #define MAX_BINARY_NAME_LENGTH 128
-#define MAX_RETRIES 5
-#define RETRY_DELAY 1
-#define MAX_SERVERS 100
+#define RETRY_DELAY 50
 
 #define PORT 8080
 #define SERVER_DIRECTORY "/tmp/compilation_server"
 #define MAX_CLIENTS 3
+
+#define SERVER_LIST_CFG "/home/kmakara/DNCC/server_list.cfg"
+
 
 #endif //COMPILATIONSERVER_CONSTANTS_H

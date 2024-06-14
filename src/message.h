@@ -12,6 +12,9 @@
 #define MSG_TYPE_SERVER_NOT_READY 6
 #define MSG_TYPE_COMPILED_FILE_READY 7
 
+#define MSG_TYPE_FILE_C 99
+#define MSG_TYPE_FILE_CPP 323
+
 typedef struct {
     uint16_t type;
     uint32_t length;

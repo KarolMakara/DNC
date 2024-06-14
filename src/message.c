@@ -16,7 +16,7 @@ void send_message_header(int client_socket, uint32_t data_length, uint16_t FLAG)
         perror("Sending header failed");
         close(client_socket);
     }
-    printf("Sent header: %hu, %hhu\n", header.type, header.length);
+//    printf("Sent header: %hu, %hhu\n", header.type, header.length);
 }
 
 MessageHeader receive_message_header(int socket, int *error_flag) {
@@ -33,7 +33,7 @@ MessageHeader receive_message_header(int socket, int *error_flag) {
         *error_flag = 0;
     }
 
-    printf("Received header: %hu, %hhu\n", header.type, header.length);
+//    printf("Received header: %hu, %hhu\n", header.type, header.length);
 
     return header;
 }

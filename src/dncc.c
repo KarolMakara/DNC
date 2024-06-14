@@ -8,131 +8,67 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <sys/time.h>
-#include <time.h>
 #include <sys/socket.h>
-#include <sys/wait.h>
 #include <regex.h>
 
 #include "message.h"
 #include "constants.h"
+#include "helpers.h"
 #include "networking.h"
-#include "file_operations.h"
+#include "load_balancer.h"
 
 
-char* extractBinaryName(const char* path) {
-    static char binaryName[MAX_BINARY_NAME_LENGTH];
-    const char* lastSeparator = strrchr(path, '/');
-    if (lastSeparator == NULL) {
-        strncpy(binaryName, path, MAX_BINARY_NAME_LENGTH - 1);
-        binaryName[MAX_BINARY_NAME_LENGTH - 1] = '\0';
-    } else {
-        strncpy(binaryName, lastSeparator + 1, MAX_BINARY_NAME_LENGTH - 1);
-        binaryName[MAX_BINARY_NAME_LENGTH - 1] = '\0';
-    }
-    return binaryName;
-}
+size_t client_count = 0;
 
-void free_arr(char **server_list, int server_count) {
-    for (int i = 0; i < server_count; i++) {
-        if (server_list && server_list[i] != NULL) {
-            free(server_list[i]);
-        }
-    }
-    free(server_list);
-}
+//todo fix when compiling itself, needs to read all args
+int recompile_locally(int argc, char **argv, int *exit_code) {
 
-char **read_server_list(const char *filename, int *server_count) {
-    char **server_list = NULL;
-    *server_count = 0;
-
-    FILE *server_file = fopen(filename, "r");
-    if (server_file == NULL) {
-        perror("Error opening server list file");
-        return NULL;
+    char *recompile_file = NULL;
+    regex_t regex;
+    int reti = regcomp(&regex, "\\.o$", REG_EXTENDED);
+    if (reti != 0) {
+        fprintf(stderr, "Failed to compile regex\n");
+        return -1;
     }
 
-    char line[32];
-    while (fgets(line, sizeof(line), server_file) != NULL) {
-        char *newline = strchr(line, '\n');
-        if (newline != NULL) {
-            *newline = '\0';
-        }
-
-        char **new_server_list = realloc(server_list, (*server_count + 1) * sizeof(char *));
-        if (new_server_list == NULL) {
-            perror("Error allocating memory for server list");
-            fclose(server_file);
-            free_arr(server_list, *server_count);
-            return NULL;
-        }
-        server_list = new_server_list;
-
-        server_list[*server_count] = strdup(line);
-        if (server_list[*server_count] == NULL) {
-            perror("Error allocating memory for server address");
-            fclose(server_file);
-            free_arr(server_list, *server_count);
-            return NULL;
-        }
-
-        (*server_count)++;
-    }
-
-    fclose(server_file);
-    return server_list;
-}
-
-void shuffle(char **server_list, int server_count) {
-    srand(time(NULL));
-    for (int i = server_count - 1; i > 0; i--) {
-        int j = rand() % (i + 1);
-        char *temp = server_list[i];
-        server_list[i] = server_list[j];
-        server_list[j] = temp;
-    }
-}
-
-
-void execute_command(const char* command) {
-    pid_t pid;
-    int status;
-    char* argv[] = {"/bin/sh", "-c", (char*)command, NULL};
-
-    pid = fork();
-    if (pid == -1) {
-        perror("fork");
-        return;
-    } else if (pid == 0) {
-        // Child process
-        execvp(argv[0], argv);
-        perror("execvp");
-        exit(1);
-    } else {
-        // Parent process
-        waitpid(pid, &status, 0);
-        if (WIFEXITED(status)) {
-            int exitStatus = WEXITSTATUS(status);
-            if (exitStatus != 0) {
-                fprintf(stderr, "Command failed with exit status %d\n", exitStatus);
+    char *output_file = NULL;
+    for (int i = 2; i < argc; i++) {
+        reti = regexec(&regex, argv[i], 0, NULL, 0);
+        if (reti == 0) {
+            recompile_file = malloc(strlen(argv[i]) + 2);
+            if (recompile_file == NULL) {
+                fprintf(stderr, "Memory allocation failed\n");
+                return -1;
             }
-        } else {
-            fprintf(stderr, "Command terminated abnormally\n");
+
+            strcpy(recompile_file, argv[i]);
+            char *extension = strstr(recompile_file, ".o");
+            strcpy(extension, ".c");
+        }
+        if (strstr(argv[i], "-o") != NULL) {
+            output_file = strdup(argv[i + 1]);
         }
     }
+
+    char recompile_command[MAX_COMMAND_LENGTH] = "";
+    strcat(recompile_command, argv[1]);
+    strcat(recompile_command, " -c ");
+    strcat(recompile_command, recompile_file);
+    strcat(recompile_command, " -o ");
+    strcat(recompile_command, output_file);
+    *exit_code = execute_command(recompile_command);
+
+
+    printf("\\033[31m recompile_command: %s\n", recompile_command);
+
+    free(recompile_file);
+    free(output_file);
+    regfree(&regex);
+
+    return 0;
 }
 
-int get_first_digit_milliseconds() {
-    struct timeval tv;
-    gettimeofday(&tv, NULL); // Get current time
-
-    // Extract milliseconds and get the first digit
-    int milliseconds = (tv.tv_usec / 1000) % 10;
-
-    return milliseconds;
-}
-
-
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     if (argc < 3) {
         fprintf(stderr, "Usage: %s gcc/g++ <gcc_opts> \n", argv[0]);
         return 1;
@@ -145,9 +81,9 @@ int main(int argc, char *argv[]) {
 
     uint16_t file_type = 0;
     if (strstr(argv[1], "gcc") != NULL) {
-        file_type = FILE_TYPE_C;
+        file_type = MSG_TYPE_FILE_C;
     } else if (strstr(argv[1], "g++") != NULL) {
-        file_type = FILE_TYPE_CPP;
+        file_type = MSG_TYPE_FILE_CPP;
     }
 
     char *source_file = NULL;
@@ -162,14 +98,13 @@ int main(int argc, char *argv[]) {
 //        printf("%s\n", argv[i]);
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             if (output_binary != NULL) {
-                free(output_binary); // Free the previous allocation, if any
+                free(output_binary);
             }
-            output_binary = malloc(strlen(argv[i + 1]) + 1); // Allocate memory for the file name
+            output_binary = malloc(strlen(argv[i + 1]) + 1);
             if (output_binary != NULL) {
-                strcpy(output_binary, argv[i + 1]); // Copy the file name
+                strcpy(output_binary, argv[i + 1]);
             } else {
                 fprintf(stderr, "Failed to allocate memory for output binary\n");
-                // Handle memory allocation failure
             }
             is_output_name = 0;
         } else if (strstr(argv[i], "-c") != NULL || strstr(argv[i], "-S") != NULL) {
@@ -179,12 +114,11 @@ int main(int argc, char *argv[]) {
             int reti = regcomp(&regex, "\\.c(pp)?$", REG_EXTENDED);
             if (reti != 0) {
                 fprintf(stderr, "Failed to compile regex\n");
-                // Handle error
             } else {
                 reti = regexec(&regex, argv[i], 0, NULL, 0);
                 if (reti == 0) {
                     if (source_file != NULL) {
-                        free(source_file); // Free the previous allocation, if any
+                        free(source_file);
                     }
                     source_file = strdup(argv[i]);
 //                    printf("SOURCE FILE %d: %s\n", i, source_file);
@@ -231,25 +165,33 @@ int main(int argc, char *argv[]) {
         }
     }
 
-//    printf("COMMAND: %s\n", command);
-//    if (link_only == 0 || is_output_name == -1) {
-//        printf("LINKING COMMAND: %s\n", command);
-//    } else {
-//        printf("PREPORCESS COMMAND: %s\n", command);
-//    }
+    int exit_code = execute_command(command);
 
-    execute_command(command);
-//    int status = system(command);
-//    printf("Running command:\n %s\n", command);
-//    if (status == -1) {
-//        perror("Error in executing command");
-//        free(preprocess_output_file);
-//        return 1;
-//    } else
+
+    if (exit_code != 0) {
+        printf("Exitcode: -1 ");printf("%s\n", command);
+        printf("preprocess_output_file %s\n", preprocess_output_file);
+
+        recompile_locally(argc, argv, &exit_code);
+
+        if (exit_code == 0) {
+            return 0;
+        }
+
+
+
+        free(preprocess_output_file);
+        free(output_binary);
+        free(source_file);
+//        recompile_locally();
+        return -1;
+    }
+
     if (link_only == 0 || is_output_name == -1) {
         free(preprocess_output_file);
         free(output_binary);
         free(source_file);
+        printf("Exitcode: 0 ");printf("%s\n", command);
         return 0;
     }
     free(source_file);
@@ -289,20 +231,21 @@ int main(int argc, char *argv[]) {
     file_size++;
 
 
-    char *output_binary_name = extractBinaryName(output_binary);
+    char *output_binary_name = extract_binary_name(output_binary);
 
     int server_count = 0;
-    char **server_list = read_server_list("/home/kmakara/DNCC/server_list.cfg", &server_count);
+    char **server_list = read_server_list(SERVER_LIST_CFG, &server_count);
     if (server_list == NULL) {
         free(file_contents);
         free(output_binary);
-        return 1;
+        printf("Exitcode: -1 ");printf("DEBUG2 %s\n", command);
+        return -1;
     }
 
-//    shuffle(server_list, server_count);
+    int client_socket;
+    int connection = -1;
 
-    int client_socket = -1;
-    int server_index = 0;
+    size_t server_index;
 
     struct sockaddr_in server_addr;
     char ip_addr[16];
@@ -312,8 +255,6 @@ int main(int argc, char *argv[]) {
     timeout.tv_sec = 1;
     timeout.tv_usec = 500;
 
-    int connection = -1;
-
     client_socket = socket(AF_INET, SOCK_STREAM, 0);
 
     if (client_socket == -1) {
@@ -321,7 +262,8 @@ int main(int argc, char *argv[]) {
         free(file_contents);
         free_arr(server_list, server_count);
         free(output_binary);
-        return 1;
+        printf("Exitcode: -1 ");printf("DEBUG3 %s\n", command);
+        return -1;
     }
 
     int tried_ips = 1;
@@ -339,23 +281,20 @@ int main(int argc, char *argv[]) {
         server_addr.sin_port = htons(port);
         if (inet_pton(AF_INET, ip_addr, &server_addr.sin_addr) <= 0) {
             fprintf(stderr, "Invalid IP address: %s\n", ip_addr);
-            server_index = (server_index + 1) % server_count;
             tried_ips++;
             continue;
-        } else {
-            printf("Trying ip... (%s)\n", ip_addr);
         }
+//        else {
+//            printf("Trying ip... (%s)\n", ip_addr);
+//        }
 
-        // todo wywala sie bo jeden z plikow sie nie kompiluje do konca i linker nie moze zlinkowa
-        // dodanie timeouta na socket to posoduje
-        connection = connect_with_timeout(client_socket, server_addr, timeout);
-//        connection = connect(client_socket, (struct sockaddr *) &server_addr, sizeof(server_addr));
+//        connection = connect_with_timeout(client_socket, server_addr, timeout);
+        connection = connect(client_socket, (struct sockaddr *) &server_addr, sizeof(server_addr));
         if (connection == 0) {
             remove_socket_timout(client_socket); // remove timeout if connected to receive long time compiled files
-            int server_ready = isServerReady(client_socket);
+            int server_ready = is_server_ready(client_socket);
             if (server_ready == 0) {
-                printf("DEBUG %d\n", file_type);
-                if (sendFileToServer(client_socket, file_contents, file_size, output_binary_name, file_type) == 0) {
+                if (send_file_to_server(client_socket, file_contents, file_size, output_binary_name, file_type) == 0) {
                     break;
                 }
             }
@@ -372,16 +311,14 @@ int main(int argc, char *argv[]) {
             }
         }
 
-
-//        server_index = (server_index + 1) % server_count;
         sleep(RETRY_DELAY);
     }
 
     if (connection != 0) {
-//        printf("Could not connect to any server\n");
         free(file_contents);
         free(output_binary);
         free_arr(server_list, server_count);
+        printf("Exitcode: -1 ");printf("DEBUG4 %s\n", command);
         return -1;
     }
 
@@ -393,6 +330,10 @@ int main(int argc, char *argv[]) {
         free(file_contents);
         free(output_binary);
         free_arr(server_list, server_count);
+        recompile_locally(argc, argv, &exit_code);
+        if (exit_code == 0) {
+            return 0;
+        }
         return -1;
     }
 
@@ -400,16 +341,14 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Unexpected message type: %u\n", header.type);
         close(client_socket);
     }
-    receiveCompiledFile(client_socket, output_binary);
+    receive_compiled_file(client_socket, output_binary);
 
-    printf("OUTPUT: %s\n", output_binary);
 
     close(client_socket);
     free(output_binary);
     free(file_contents);
 
     free_arr(server_list, server_count);
-
-    printf("RETURNING?\n");
+    printf("Exitcode: 0\n");
     return 0;
 }
