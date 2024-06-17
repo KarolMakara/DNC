@@ -22,7 +22,7 @@
 extern size_t client_count;
 
 int connect_with_timeout(int socket, struct sockaddr_in server_addr, struct timeval timeout);
-int remove_socket_timout(int socket);
+int remove_socket_timeout(int socket);
 int receive_ACK(int socket);
 int is_server_ready(int client_socket);
 int send_file_to_server(int client_socket, const char *data, size_t data_length, const char *output_binary, uint16_t file_type);

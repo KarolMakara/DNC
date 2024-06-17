@@ -70,7 +70,7 @@ int connect_with_timeout(int socket, struct sockaddr_in server_addr, struct time
     }
 
     int n;
-    n = select(socket+1,&Read,&Write,NULL,&timeout);
+    n = select(socket+1,&Read,&Write,&Err, &timeout);
     if ( n <= 0) {
         return -1;
     }
@@ -78,7 +78,7 @@ int connect_with_timeout(int socket, struct sockaddr_in server_addr, struct time
 }
 
 
-int remove_socket_timout(int socket) {
+int remove_socket_timeout(int socket) {
     struct timeval timeout;
     timeout.tv_sec = 0;
     timeout.tv_usec = 0;
@@ -190,21 +190,21 @@ void receive_compiled_file(int client_socket, const char *output_file_path) {
         return;
     }
 
-//    int flags = fcntl(client_socket, F_GETFL, 0);
-//    fcntl(client_socket, F_SETFL, flags | O_NONBLOCK);
-//
-//    fd_set read_fds;
-//
-//    FD_ZERO(&read_fds);
-//    FD_SET(client_socket, &read_fds);
+    int flags = fcntl(client_socket, F_GETFL, 0);
+    fcntl(client_socket, F_SETFL, flags | O_NONBLOCK);
+
+    fd_set read_fds;
+
+    FD_ZERO(&read_fds);
+    FD_SET(client_socket, &read_fds);
 
 
-//    int select_result = select(client_socket + 1, &read_fds, NULL, NULL, NULL);
-//    if (select_result == -1) {
-//        perror("Error in select");
-//    } else if (select_result == 0) {
-//        printf("Timeout occurred while waiting for data.\n");
-//    }
+    int select_result = select(client_socket + 1, &read_fds, NULL, NULL, NULL);
+    if (select_result == -1) {
+        perror("Error in select");
+    } else if (select_result == 0) {
+        printf("Timeout occurred while waiting for data.\n");
+    }
 
     size_t total_received = 0;
 
@@ -234,7 +234,7 @@ void receive_compiled_file(int client_socket, const char *output_file_path) {
     free(buffer);
 
 // Set the socket back to blocking mode
-//    fcntl(client_socket, F_SETFL, flags);
+    fcntl(client_socket, F_SETFL, ~O_NONBLOCK);
 }
 
 
@@ -519,11 +519,11 @@ void handle_client(int client_socket) {
     free(output_binary);
     free(buffer);
 
-//    if (remove(file_path) == 0 && remove(path_to_output_binary) == 0) {
-//        printf("Files '%s' and '%s' deleted successfully.\n", file_path, path_to_output_binary);
-//    } else {
-//        perror("Error deleting file");
-//    }
+    if (remove(file_path) == 0 && remove(path_to_output_binary) == 0) {
+        printf("Files '%s' and '%s' deleted successfully.\n", file_path, path_to_output_binary);
+    } else {
+        perror("Error deleting file");
+    }
 
     free(file_path);
     close(client_socket);

@@ -288,10 +288,10 @@ int main(int argc, char **argv) {
 //            printf("Trying ip... (%s)\n", ip_addr);
 //        }
 
-//        connection = connect_with_timeout(client_socket, server_addr, timeout);
-        connection = connect(client_socket, (struct sockaddr *) &server_addr, sizeof(server_addr));
+        connection = connect_with_timeout(client_socket, server_addr, timeout);
+//        connection = connect(client_socket, (struct sockaddr *) &server_addr, sizeof(server_addr));
         if (connection == 0) {
-            remove_socket_timout(client_socket); // remove timeout if connected to receive long time compiled files
+            remove_socket_timeout(client_socket); // remove timeout if connected to receive long time compiled files
             int server_ready = is_server_ready(client_socket);
             if (server_ready == 0) {
                 if (send_file_to_server(client_socket, file_contents, file_size, output_binary_name, file_type) == 0) {
